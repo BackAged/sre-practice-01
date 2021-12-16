@@ -101,7 +101,7 @@ jobs:
         run: exit 1
   
   apply:
-    needs: plan
+    needs: validate
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     defaults:
