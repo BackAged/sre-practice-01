@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - develop
-      - "feat/**"
-      - "feature/**"
     paths:
       - "cloud-provision/**"
   pull_request:
@@ -15,22 +13,18 @@ on:
       - "cloud-provision/**"
 
 env:
-  GCLOUD_PROJECT_ID: ${{ secrets.GKE_PROJECT }}
-  GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_DEV_SERVICE_KEY }}
+  GITHUB_TOKEN: $${{ secrets.GH_TOKEN }}
+  GCLOUD_PROJECT_ID: dev-sre-335217
+  GCLOUD_DEV_SERVICE_KEY: ${{ secrets.GCLOUD_DEV_SERVICE_KEY }}
+  GOOGLE_APPLICATION_CREDENTIALS: "./key.json"
 
 jobs:
-  setup-google-cloud:
-    name: Setup google cloud and authenticate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: google-github-actions/setup-gcloud
-        with:
-          service_account_key: ${{ secrets.GCLOUD_SERVICE_KEY }}
-          project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
-
   validate:
     name: validate terraform hcl
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./cloud-provision/dev
     outputs:
       fmt: ${{ steps.fmt.outcome }}
       init: ${{ steps.init.outcome }}
@@ -38,7 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - uses: hashicorp/setup-terraform@v1
+      - name: Terraform setup
+        uses: hashicorp/setup-terraform@v1
       - name: Terraform fmt
         id: fmt
         run: terraform fmt -check
@@ -53,10 +48,19 @@ jobs:
     needs: validate
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./cloud-provision/dev
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - uses: hashicorp/setup-terraform@v1
+      - name: Setup google cloud service key
+        env:
+          sk: ${{ env.GCLOUD_DEV_SERVICE_KEY }}
+        run: |
+          echo "$sk" > ./key.json
+      - name: Terraform setup
+        uses: hashicorp/setup-terraform@v1
       - name: Terraform init
         run: terraform init
         id: init
@@ -66,10 +70,10 @@ jobs:
         run: terraform plan -no-color
         continue-on-error: true
       - name: Terraform plan output PR comment
+        uses: actions/github-script@v5
         env:
           PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const output = `#### Terraform Format and Style 🖌\`${{ needs.validate.outputs.fmt }}\`
             #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
@@ -86,9 +90,38 @@ jobs:
 
             *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Working Directory: \`${{ env.tf_actions_working_dir }}\`, Workflow: \`${{ github.workflow }}\`*`;
               
-            github.issues.createComment({
+            github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: output
             })
+      - name: Check on failures
+        if: steps.init.outcome != 'success' || steps.plan.outcome != 'success'
+        run: exit 1
+  
+  apply:
+    needs: plan
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./cloud-provision/dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Setup google cloud service key
+        env:
+          sk: ${{ env.GCLOUD_DEV_SERVICE_KEY }}
+        run: |
+          echo "$sk" > ./key.json
+      - name: Terraform setup
+        uses: hashicorp/setup-terraform@v1
+      - name: Terraform init
+        run: terraform init
+        id: init
+      - name: Terraform apply
+        id: plan
+        run: terraform apply -auto-approve  
+
+
