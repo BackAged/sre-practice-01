@@ -1,0 +1,1 @@
+{"Modules":[{"Key":"vpc-network","Source":"../modules/network","Dir":"../modules/network"},{"Key":"kube_cluster","Source":"../modules/kluster","Dir":"../modules/kluster"},{"Key":"","Source":"","Dir":"."}]}
